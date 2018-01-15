@@ -1,9 +1,9 @@
 ---
 - name: create a non-root user with sudo rights
   hosts: all
-  remote_user: root
+  remote_user: user
   vars_files:
-  - customize.yml
+  - vars.yml
   tasks:
 
   - name: update aptitude cache
@@ -28,22 +28,13 @@
     authorized_key: user={{ username }} state=present
                     key="{{ lookup('file', local_ssh_pubkey) }}"
 
-  - name: synchronize the known_hosts file.
-    copy: src=~/.ssh/known_hosts dest=/home/{{ username }}/.ssh/known_hosts
-          owner={{ username }} mode=0644
-
   - name: some basic apt stuff
-    apt: pkg={{ item }} state=installed
-         update_cache=yes cache_valid_time=3600
-    with_items:
-    - git
-    - vim
-    - libxslt1-dev
+    apt: pkg=git state=installed
 
-- name: install devstack
-  hosts: all
+- name: install devstack on controllers
+  hosts: controllers
   vars_files:
-  - customize.yml
+  - vars.yml
   remote_user: "{{ username }}"
   tasks:
 
@@ -53,19 +44,40 @@
          version={{ branch }}
 
   - name: devstack local.conf
-    template: src=templates/devstack-local.conf.j2
+    template: src=templates/controller-local.conf
               dest=~/devstack/local.conf
 
   - name: stack it
     command: chdir=~/devstack ./stack.sh
     ignore_errors: yes
 
-  - name: reinstall cinder's requirements
-    command: pip install --upgrade -r /opt/stack/cinder/requirements.txt
-    sudo: yes
+- name: install devstack on computes
+  hosts: computes
+  vars_files:
+  - vars.yml
+  remote_user: "{{ username }}"
+  tasks:
 
-  - name: unstack it
-    command: chdir=~/devstack ./unstack.sh
+  - name: clone devstack
+    git: repo=https://github.com/openstack-dev/devstack.git
+         dest=~/devstack
+         version={{ branch }}
 
-  - name: restack it
+  - name: devstack local.conf
+    template: src=templates/compute-local.conf
+              dest=~/devstack/local.conf
+
+  - name: stack it
     command: chdir=~/devstack ./stack.sh
+    ignore_errors: yes
+
+- name: update controllers' compute host discovery
+  hosts: controllers
+  vars_files:
+  - vars.yml
+  remote_user: "{{ username }}"
+  tasks:
+
+  - name: run discover_hosts.sh
+    command: chdir=~/devstack ./tools/discover_hosts.sh
+    ignore_errors: yes
